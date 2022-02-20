@@ -4,34 +4,79 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
-char ** mkargv(char * ln)
-{
-    int argc = 0;
-    size_t argvsz = 5;
-    char ** argv = calloc(argvsz, sizeof(char*));
+// TODO: exit, cd, path commands
+// TODO: shell redirection
+// TODO: parallel commands with &
+// TODO: error handling
+// TODO: custom paths
 
-    char * tok = strtok(ln, " \n");
+struct args {
+    char **argv;
+    unsigned long argc;
+    size_t sz;
+};
+
+int addarg(struct args *args, char *arg)
+{
+    if (arg == NULL) return 0;
+    if (args->argc > args->sz) {
+        args->sz *= 2;
+        args->argv = realloc(args->argv, args->sz * sizeof(char *));
+    }
+    args->argv[args->argc++] = arg;
+    return 1;
+}
+
+struct args *mkargs(char * ln)
+{
+    struct args *args = malloc(sizeof(struct args));
+    args->argc = 0;
+    args->sz = 5;
+    args->argv = calloc(args->sz, sizeof(char *));
+
+    char * saveptr;
+    char * tok = strtok_r(ln, " \n", &saveptr);
     do {
-        argv[argc++] = tok;
-        tok = strtok(NULL, " \n");
+        addarg(args, tok);
+        tok = strtok_r(NULL, " \n", &saveptr);
     } while (tok != NULL);
-    return argv;
+    return args;
 }
 
 void execln(char * ln)
 {
-    int pid = fork();
-    char ** argv;
-    switch (pid) {
-        case -1:
-            break;
-        case 0:
-            argv = mkargv(ln);
-            execvp(argv[0], argv);
-        default:
-            wait(NULL);
-            break;
+    struct args * args = mkargs(ln);
+    if (args->argv[0] == NULL) {
+        free(args);
+        return;
     }
+
+    // TODO: pass error if argc > 1
+    if (strcmp(args->argv[0], "exit") == 0)
+        exit(0);
+    // TODO: handle error from chdir
+    else if (strcmp(args->argv[0], "cd") == 0) {
+        if (args->argc > 1)
+            chdir(args->argv[1]);
+    }
+    // TODO: implement for path
+    //else if (strcmp(argv[0], "path") == 0)
+    else {
+        // TODO: check all argv for redirection
+        int pid = fork();
+        switch (pid) {
+            case -1:
+                break;
+            case 0:
+                execvp(args->argv[0], args->argv);
+                exit(1);
+            default:
+                wait(NULL);
+                break;
+        }
+    }
+    free(args->argv);
+    free(args);
 }
 
 void prompt()
@@ -49,9 +94,6 @@ void prompt()
 
 void batch(char * fname)
 {
-    // argv[1] should be the batch file
-    // go through batch file line by line
-    // execute those programs with fork and exec
     FILE * f = fopen(fname, "r");
     size_t bufsz = 255;
     char * buf = malloc(sizeof(char)*bufsz);
