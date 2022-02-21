@@ -6,7 +6,6 @@
 #include <unistd.h>
 
 // TODO: path command
-// TODO: parallel commands with &
 // TODO: error handling
 // TODO: custom paths
 
@@ -43,10 +42,12 @@ struct args *mkargs(char * ln)
     return args;
 }
 
-char *chkredir(struct args* args)
+char *chkredir(struct args *args)
 {
     char **argv = args->argv;
     // TODO: check for multiple symbols, if present raise an error
+    // TODO: also check if > is present in the beginning of a string
+    //  return the rest of that string
     for (unsigned long i = 1; i < args->argc; i++) {
         if (strcmp(argv[i], ">") == 0) {
             argv[i] = NULL;
@@ -56,15 +57,16 @@ char *chkredir(struct args* args)
     return NULL;
 }
 
-void execln(char * ln)
+int execcmd(char *ln)
 {
     struct args *args = mkargs(ln);
     char **argv = args->argv;
     if (argv[0] == NULL) {
         free(args);
-        return;
+        return -1;
     }
 
+    int pid = -1;
     // TODO: pass error if argc > 1
     if (strcmp(argv[0], "exit") == 0)
         exit(0);
@@ -77,25 +79,52 @@ void execln(char * ln)
     //else if (strcmp(argv[0], "path") == 0)
     else {
         char *fredir = chkredir(args);
-        if (fredir != NULL) puts(fredir);
-        int pid = fork();
-        switch (pid) {
-            case -1:
-                break;
-            case 0:
-                if (fredir != NULL) {
-                    close(STDOUT_FILENO);
-                    dup2(open(fredir, O_RDWR | O_CREAT, 0644), STDOUT_FILENO);
-                }
-                execvp(argv[0], argv);
-                exit(1);
-            default:
-                wait(NULL);
-                break;
+        pid = fork();
+        if (pid == 0) {
+            if (fredir != NULL) {
+                close(STDOUT_FILENO);
+                dup2(open(fredir, O_RDWR | O_CREAT, 0644), STDOUT_FILENO);
+            }
+            execvp(argv[0], argv);
+            exit(1);
         }
     }
     free(argv);
     free(args);
+    return pid;
+}
+
+struct cmds {
+    int *pids;
+    unsigned long count;
+    size_t sz;
+};
+
+int addpid(struct cmds *cmds, int pid)
+{
+    if (pid < 0) return 0;
+    if (cmds->count > cmds->sz) {
+        cmds->sz *= 2;
+        cmds->pids = realloc(cmds->pids, cmds->sz * sizeof(int));
+    }
+    cmds->pids[cmds->count++] = pid;
+    return 1;
+}
+
+void execln(char *ln)
+{
+    struct cmds cmds = {.count = 0, .sz = 5};
+    cmds.pids = calloc(cmds.sz, sizeof(int));
+    char *saveptr;
+    char *tok = strtok_r(ln, "&", &saveptr);
+    do {
+        addpid(&cmds, execcmd(tok));
+        tok = strtok_r(NULL, "&", &saveptr);
+    } while (tok != NULL);
+    for (unsigned long i = 0; i < cmds.count; i++) {
+        waitpid(cmds.pids[i], NULL, 0);
+    }
+    free(cmds.pids);
 }
 
 void prompt()
