@@ -9,6 +9,10 @@
 // TODO: error handling
 // TODO: custom paths
 
+#define ERR()   do {\
+                fputs("An error has occurred\n", stderr);\
+                } while (0)
+
 struct args {
     char **argv;
     unsigned long argc;
@@ -42,19 +46,44 @@ struct args *mkargs(char * ln)
     return args;
 }
 
-char *chkredir(struct args *args)
+int redirect(char * fname)
 {
+    if (fname != NULL) {
+        int fd = open(fname, O_RDWR | O_CREAT, 0644);
+        if (fd < 0) return -1;
+        close(STDOUT_FILENO);
+        close(STDERR_FILENO);
+        if (dup2(fd, STDOUT_FILENO) < 0)
+            return -1;
+        if (dup2(fd, STDERR_FILENO) < 0)
+            return -1;
+    }
+    return 0;
+}
+
+int redir(struct args *args)
+{
+    unsigned long i;
+    char * match = NULL;
     char **argv = args->argv;
-    // TODO: check for multiple symbols, if present raise an error
-    // TODO: also check if > is present in the beginning of a string
-    //  return the rest of that string
-    for (unsigned long i = 1; i < args->argc; i++) {
+    for (i = 1; i < args->argc; i++) {
         if (strcmp(argv[i], ">") == 0) {
+            // ex: ls > out
             argv[i] = NULL;
-            return argv[i+1];
+            match = argv[++i];
+            break;
+        } else if (argv[i][0] == '>') {
+            // ex: ls >out
+            argv[i] = NULL;
+            match = argv[i]+1;
+            break;
         }
     }
-    return NULL;
+    if (match != NULL && args->argc > i+1) {
+        ERR();
+        return -1;
+    }
+    return redirect(match);
 }
 
 int execcmd(char *ln)
@@ -67,25 +96,22 @@ int execcmd(char *ln)
     }
 
     int pid = -1;
-    // TODO: pass error if argc > 1
-    if (strcmp(argv[0], "exit") == 0)
-        exit(0);
-    // TODO: handle error from chdir
-    else if (strcmp(argv[0], "cd") == 0) {
-        if (args->argc > 1)
-            chdir(argv[1]);
+    if (strcmp(argv[0], "exit") == 0) {
+        if (args->argc > 1) {
+            ERR();
+        } else {
+            exit(0);
+        }
+    } else if (strcmp(argv[0], "cd") == 0) {
+        if (args->argc != 2 || chdir(argv[1]) < 0) ERR();
     }
     // TODO: implement for path
     //else if (strcmp(argv[0], "path") == 0)
     else {
-        char *fredir = chkredir(args);
         pid = fork();
         if (pid == 0) {
-            if (fredir != NULL) {
-                close(STDOUT_FILENO);
-                dup2(open(fredir, O_RDWR | O_CREAT, 0644), STDOUT_FILENO);
-            }
-            execvp(argv[0], argv);
+            if (redir(args) == 0)
+                execvp(argv[0], argv);
             exit(1);
         }
     }
@@ -142,8 +168,8 @@ void prompt()
 
 void batch(char *fname)
 {
-    // TODO: handle error if fname is invalid
     FILE *f = fopen(fname, "r");
+    if (f == NULL) {ERR(); exit(1);}
     size_t bufsz = 255;
     char *buf = malloc(sizeof(char) * bufsz);
     int num = getline(&buf, &bufsz, f);
