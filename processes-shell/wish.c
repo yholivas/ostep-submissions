@@ -13,6 +13,10 @@
                 fputs("An error has occurred\n", stderr);\
                 } while (0)
 
+#define PATHSZ 5
+#define PATHLEN 50
+char paths[PATHSZ][PATHLEN];
+
 struct args {
     char **argv;
     unsigned long argc;
@@ -66,6 +70,9 @@ int redir(struct args *args)
     unsigned long i;
     char * match = NULL;
     char **argv = args->argv;
+    // TODO: take care of strings like "ls>out" or "ls> out"
+    // TODO: raise error when no output specified
+    // TODO: raise error when there is nothing before the redirection
     for (i = 1; i < args->argc; i++) {
         if (strcmp(argv[i], ">") == 0) {
             // ex: ls > out
@@ -86,6 +93,23 @@ int redir(struct args *args)
     return redirect(match);
 }
 
+char exebuf[100];
+
+char *getexe(char * cmd)
+{
+    for (int i = 0; i < PATHSZ; i++) {
+        if (paths[i] == NULL) break;
+        if (strlen(cmd) + strlen(paths[i]) < 99) {
+            strcpy(exebuf, paths[i]);
+            strcat(exebuf, "/");
+            strcat(exebuf, cmd);
+            if (access(exebuf, X_OK) == 0)
+                return exebuf;
+        }
+    }
+    return NULL;
+}
+
 int execcmd(char *ln)
 {
     struct args *args = mkargs(ln);
@@ -104,14 +128,21 @@ int execcmd(char *ln)
         }
     } else if (strcmp(argv[0], "cd") == 0) {
         if (args->argc != 2 || chdir(argv[1]) < 0) ERR();
-    }
-    // TODO: implement for path
-    //else if (strcmp(argv[0], "path") == 0)
-    else {
+    } else if (strcmp(argv[0], "path") == 0) {
+        for (unsigned long i = 0; i < PATHSZ; i++) {
+            if (i >= args->argc-1)
+                strcpy(paths[i], "");
+            else if (strlen(argv[i+1]) < 50)
+                strcpy(paths[i], argv[i+1]);
+        }
+    } else {
+        // look up executable from argv[0]
+        char * exe = getexe(argv[0]);
         pid = fork();
         if (pid == 0) {
-            if (redir(args) == 0)
-                execvp(argv[0], argv);
+            if (exe != NULL && redir(args) == 0)
+                execv(exe, argv);
+            ERR();
             exit(1);
         }
     }
@@ -166,8 +197,9 @@ void prompt()
     free(buf);
 }
 
-void batch(char *fname)
+void batch(char *fname, int argc)
 {
+    if (argc > 2) {ERR(); exit(1);}
     FILE *f = fopen(fname, "r");
     if (f == NULL) {ERR(); exit(1);}
     size_t bufsz = 255;
@@ -182,9 +214,10 @@ void batch(char *fname)
 
 int main(int argc, char *argv[])
 {
+    strcpy(paths[0], "/bin");
     switch (argc) {
         case 1: prompt();
-        default: batch(argv[1]);
+        default: batch(argv[1], argc);
     }
     return 0;
 }
