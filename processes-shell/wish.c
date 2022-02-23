@@ -5,10 +5,6 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
-// TODO: path command
-// TODO: error handling
-// TODO: custom paths
-
 #define ERR()   do {\
                 fputs("An error has occurred\n", stderr);\
                 } while (0)
@@ -50,47 +46,47 @@ struct args *mkargs(char * ln)
     return args;
 }
 
-int redirect(char * fname)
+int redir(char * fname)
 {
-    if (fname != NULL) {
-        int fd = open(fname, O_RDWR | O_CREAT, 0644);
-        if (fd < 0) return -1;
-        close(STDOUT_FILENO);
-        close(STDERR_FILENO);
-        if (dup2(fd, STDOUT_FILENO) < 0)
-            return -1;
-        if (dup2(fd, STDERR_FILENO) < 0)
-            return -1;
+    if (fname == NULL) return 0;
+    int fd = open(fname, O_RDWR | O_CREAT, 0644);
+    if (fd < 0) return -1;
+    close(STDOUT_FILENO);
+    close(STDERR_FILENO);
+    if (dup2(fd, STDOUT_FILENO) < 0)
+        return -1;
+    if (dup2(fd, STDERR_FILENO) < 0)
+        return -1;
+    return 0;
+}
+
+struct proc {
+    char *cmd;
+    char *redir;
+};
+
+int getredir(char *str, struct proc *proc)
+{
+    char *saveptr;
+    char *tok = strtok_r(str, " \n", &saveptr);
+    if (tok == NULL) {
+        ERR();
+        return -1;
+    }
+    proc->redir = tok;
+    if (strtok_r(NULL, " \n", &saveptr) != NULL) {
+        ERR();
+        return -1;
     }
     return 0;
 }
 
-int redir(struct args *args)
+int chkredir(char *ln, struct proc *proc)
 {
-    unsigned long i;
-    char * match = NULL;
-    char **argv = args->argv;
-    // TODO: take care of strings like "ls>out" or "ls> out"
-    // TODO: raise error when no output specified
-    // TODO: raise error when there is nothing before the redirection
-    for (i = 1; i < args->argc; i++) {
-        if (strcmp(argv[i], ">") == 0) {
-            // ex: ls > out
-            argv[i] = NULL;
-            match = argv[++i];
-            break;
-        } else if (argv[i][0] == '>') {
-            // ex: ls >out
-            argv[i] = NULL;
-            match = argv[i]+1;
-            break;
-        }
-    }
-    if (match != NULL && args->argc > i+1) {
-        ERR();
-        return -1;
-    }
-    return redirect(match);
+    proc->cmd = strsep(&ln, ">");
+    if (ln != NULL)
+        return getredir(ln, proc);
+    return 0;
 }
 
 char exebuf[100];
@@ -107,14 +103,20 @@ char *getexe(char * cmd)
                 return exebuf;
         }
     }
+    ERR();
     return NULL;
 }
 
 int execcmd(char *ln)
 {
-    struct args *args = mkargs(ln);
+    struct proc proc = {.cmd = NULL, .redir = NULL};
+    if (chkredir(ln, &proc) < 0) return -1;
+    struct args *args = mkargs(proc.cmd);
     char **argv = args->argv;
     if (argv[0] == NULL) {
+        if (proc.redir != NULL)
+            ERR();
+        free(argv);
         free(args);
         return -1;
     }
@@ -140,9 +142,8 @@ int execcmd(char *ln)
         char * exe = getexe(argv[0]);
         pid = fork();
         if (pid == 0) {
-            if (exe != NULL && redir(args) == 0)
+            if (exe != NULL && redir(proc.redir) == 0)
                 execv(exe, argv);
-            ERR();
             exit(1);
         }
     }
