@@ -22,7 +22,7 @@ struct args {
 int addarg(struct args *args, char *arg)
 {
     if (arg == NULL) return 0;
-    if (args->argc > args->sz) {
+    if (args->argc >= args->sz) {
         args->sz *= 2;
         args->argv = realloc(args->argv, args->sz * sizeof(char *));
     }
